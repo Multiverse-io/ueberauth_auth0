@@ -33,4 +33,6 @@ defmodule SpecSignerModule do
   end
 end
 
+Mimic.copy(Ueberauth.Strategy.Auth0.OAuth)
+
 ExUnit.start()

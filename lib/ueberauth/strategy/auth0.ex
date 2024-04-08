@@ -152,8 +152,11 @@ defmodule Ueberauth.Strategy.Auth0 do
           |> verify_token_and_put_private(client)
         end
 
-      {:error, client} ->
-        set_errors!(conn, [error(client.body["error"], client.body["error_description"])])
+      {:error, %{body: %{"error" => error, "error_description" => error_description}}} ->
+        set_errors!(conn, [error(error, error_description)])
+
+      {:error, error} ->
+        set_errors!(conn, [error(error, "")])
     end
   end
 
