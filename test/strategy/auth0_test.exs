@@ -2,12 +2,14 @@ defmodule Ueberauth.Strategy.Auth0Test do
   # Test resources:
   use ExUnit.Case, async: true
   use ExVCR.Mock, adapter: ExVCR.Adapter.Hackney
+  use Mimic
 
   use Plug.Test
 
   # Custom data:
   import Ueberauth.Strategy.Auth0, only: [info: 1, extra: 1]
   alias Ueberauth.Auth.{Extra, Info}
+  alias Ueberauth.Strategy.Auth0.OAuth
 
   # Initializing utils:
   doctest Ueberauth.Strategy.Auth0
@@ -160,6 +162,53 @@ defmodule Ueberauth.Strategy.Auth0Test do
         ## Tokens have expiration time (see other test below)
         assert auth.credentials.expires == true
         assert is_integer(auth.credentials.expires_at)
+      end
+    end
+
+    test "the call to OAuth2 to get the token returns an error in the format {:error, \"some string\"}, we handle it gracefully",
+         %{id_token: id_token} do
+      Mimic.stub(OAuth)
+      Mimic.expect(OAuth, :authorize_url!, fn _, _ -> "https://some.url" end)
+      Mimic.expect(OAuth, :get_token!, fn _, _ -> {:error, "error code: 502"} end)
+
+      request_conn =
+        :get
+        |> conn("/auth/auth0", id: "foo")
+        |> SpecRouter.call(@router)
+        |> Plug.Conn.fetch_cookies()
+
+      state = request_conn.private[:ueberauth_state_param]
+      code = "some_code"
+      body = id_token |> response_body() |> Jason.encode!()
+
+      use_cassette :stub,
+        method: :post,
+        headers: response_headers(),
+        body: body,
+        status_code: 200 do
+        conn =
+          :get
+          |> conn("/auth/auth0/callback",
+            id: "foo",
+            code: code,
+            state: state
+          )
+          |> Map.put(:cookies, request_conn.cookies)
+          |> Map.put(:req_cookies, request_conn.req_cookies)
+          |> Plug.Session.call(@session_options)
+          |> SpecRouter.call(@router)
+
+        auth = conn.assigns.ueberauth_failure
+        assert conn.private[:auth0_state] == nil
+
+        expected_error = %Ueberauth.Failure.Error{
+          message: "",
+          message_key: "error code: 502"
+        }
+
+        assert auth.provider == :auth0
+        assert auth.strategy == Ueberauth.Strategy.Auth0
+        assert auth.errors == [expected_error]
       end
     end
 
